@@ -114,13 +114,17 @@ export class Menu {
     this._refresh(name);
   }
 
+  /**
+   * Oculta por completo el contenedor del menú (deja el canvas a la vista).
+   * Necesario al arrancar un nivel o al reanudar desde la pausa.
+   */
   hide() {
     this.root.classList.add('hidden');
     this.current = null;
   }
 
-  /** Cierra el menú sin tocar el estado del juego (para arrancar nivel). */
-  killMenu() { this.root.classList.add('hidden'); this.current = null; }
+  /** Alias de hide(): cierra el menú sin tocar el estado del juego. */
+  killMenu() { this.hide(); }
 
   back() {
     const g = this.game;
