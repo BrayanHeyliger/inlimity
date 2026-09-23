@@ -1,0 +1,26 @@
+{
+  "number": 1,
+  "name": "Primer Contacto",
+  "turnLimit": 14,
+  "scaling": 1.0,
+  "squad": ["scout", "bounce"],
+  "playerSpawns": [{ "cx": 1, "cy": 5 }, { "cx": 2, "cy": 7 }],
+  "enemies": [
+    { "type": "grunt", "cx": 13, "cy": 3 },
+    { "type": "grunt", "cx": 13, "cy": 7 }
+  ],
+  "tip": "Aprovecha los rebotes: una bala puede alcanzar lo que no ves.",
+  "layout": [
+    "################",
+    "#..............#",
+    "#.....##.......#",
+    "#.....##.......#",
+    "#..............#",
+    "#....##....b...#",
+    "#....##........#",
+    "#..............#",
+    "#.......##.....#",
+    "#.......##.....#",
+    "################"
+  ]
+}

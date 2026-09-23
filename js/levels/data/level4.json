@@ -1,0 +1,29 @@
+{
+  "number": 4,
+  "name": "Emboscada",
+  "turnLimit": 20,
+  "scaling": 1.2,
+  "squad": ["scout", "bounce", "tank", "ghost"],
+  "playerSpawns": [{ "cx": 1, "cy": 1 }, { "cx": 1, "cy": 9 }, { "cx": 2, "cy": 5 }, { "cx": 2, "cy": 7 }],
+  "enemies": [
+    { "type": "sniper", "cx": 14, "cy": 1 },
+    { "type": "sniper", "cx": 14, "cy": 9 },
+    { "type": "brute", "cx": 12, "cy": 5 },
+    { "type": "drone", "cx": 7, "cy": 3 },
+    { "type": "drone", "cx": 7, "cy": 7 }
+  ],
+  "tip": "Cuidado con los fosos: bloquean el paso pero no las balas.",
+  "layout": [
+    "################",
+    "#.....o..o.....#",
+    "#..##......##..#",
+    "#..............#",
+    "#....bb..bb....#",
+    "#......cc......#",
+    "#....bb..bb....#",
+    "#..............#",
+    "#..##......##..#",
+    "#.....o..o.....#",
+    "################"
+  ]
+}

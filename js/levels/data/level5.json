@@ -1,0 +1,29 @@
+{
+  "number": 5,
+  "name": "OMEGA",
+  "turnLimit": 26,
+  "scaling": 1.25,
+  "squad": ["scout", "bounce", "tank", "ghost"],
+  "playerSpawns": [{ "cx": 1, "cy": 1 }, { "cx": 1, "cy": 9 }, { "cx": 2, "cy": 4 }, { "cx": 2, "cy": 6 }],
+  "enemies": [
+    { "type": "boss", "cx": 13, "cy": 5 },
+    { "type": "grunt", "cx": 11, "cy": 1 },
+    { "type": "grunt", "cx": 11, "cy": 9 },
+    { "type": "drone", "cx": 9, "cy": 3 },
+    { "type": "drone", "cx": 9, "cy": 7 }
+  ],
+  "tip": "OMEGA cambia de fase al recibir daño. Vigila su telegrafía roja.",
+  "layout": [
+    "################",
+    "#..c........c..#",
+    "#..##......##..#",
+    "#..............#",
+    "#....bb..bb....#",
+    "#......##......#",
+    "#....bb..bb....#",
+    "#..............#",
+    "#..##......##..#",
+    "#..c........c..#",
+    "################"
+  ]
+}

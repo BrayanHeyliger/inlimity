@@ -1,0 +1,27 @@
+{
+  "number": 2,
+  "name": "Pasillo Angosto",
+  "turnLimit": 16,
+  "scaling": 1.0,
+  "squad": ["scout", "bounce", "tank"],
+  "playerSpawns": [{ "cx": 1, "cy": 1 }, { "cx": 1, "cy": 5 }, { "cx": 1, "cy": 9 }],
+  "enemies": [
+    { "type": "grunt", "cx": 14, "cy": 2 },
+    { "type": "sniper", "cx": 14, "cy": 8 },
+    { "type": "drone", "cx": 9, "cy": 5 }
+  ],
+  "tip": "El muro central es tu mejor aliado. Busca el ángulo de rebote.",
+  "layout": [
+    "################",
+    "#..........#...#",
+    "#..........#...#",
+    "#..####....#...#",
+    "#..........#...#",
+    "#....c.....b...#",
+    "#..........#...#",
+    "#..####....#...#",
+    "#..........#...#",
+    "#..........#...#",
+    "################"
+  ]
+}
