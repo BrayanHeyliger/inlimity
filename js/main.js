@@ -11,7 +11,30 @@ function boot() {
     return;
   }
 
-  const game = new GameManager(canvas);
+  // Red de seguridad: si algo revienta antes de que exista el juego,
+  // lo mostramos en pantalla en vez de dejar una página muda.
+  window.addEventListener('error', (e) => {
+    const el = document.getElementById('toast');
+    if (!el) return;
+    el.textContent = 'Error: ' + (e.message || e.error);
+    el.classList.remove('hidden');
+    el.style.background = 'rgba(80,10,20,.96)';
+    el.style.borderColor = '#f43f5e';
+  });
+
+  let game;
+  try {
+    game = new GameManager(canvas);
+  } catch (err) {
+    console.error('[Inlimity] Fallo al crear el juego:', err);
+    const el = document.getElementById('toast');
+    if (el) {
+      el.textContent = 'Fallo al iniciar: ' + err.message;
+      el.classList.remove('hidden');
+    }
+    return;
+  }
+
   window.game = game;                     // acceso desde consola para depurar
 
   // El audio necesita un gesto del usuario antes de sonar.

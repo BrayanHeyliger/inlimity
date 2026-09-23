@@ -4,8 +4,8 @@
 // Para usar sprites en el futuro: activar ASSETS.enabled y rellenar
 // ASSETS.images con las claves indicadas — el resto del código no cambia.
 
-import { COLORS, TILE, GRID, BALLISTICS } from '../utils/Constants.js';
-import { clamp, easeOutCubic } from '../utils/Math.js';
+import { COLORS, TILE, GRID } from '../utils/Constants.js';
+import { clamp } from '../utils/Math.js';
 
 /** Espacio reservado para arte externo (Fase 2). */
 export const ASSETS = {
@@ -13,16 +13,27 @@ export const ASSETS = {
   images: {},   // { hero_scout: Image, enemy_grunt: Image, floor: Image, wall: Image }
 };
 
+/** Ancho/alto lógicos del tablero (16x11 celdas de 48px). */
+const BOARD_W = GRID.COLS * TILE;   // 768
+const BOARD_H = GRID.ROWS * TILE;   // 528
+
 export class Renderer {
   constructor(ctx) {
     this.ctx = ctx;
     this.scale = 1;
   }
 
-  setScale(s) { this.scale = s; }
+  setScale(s) { this.scale = s > 0 ? s : 1; }
 
+  /**
+   * Fija la transformación al espacio lógico del tablero.
+   * El canvas mide BOARD_W * dpr de ancho, así que para dibujar en
+   * coordenadas lógicas hay que escalar por (dpr = this.scale).
+   * OJO: sólo se multiplica por dpr, NUNCA por el tamaño CSS.
+   */
   _reset() {
-    this.ctx.setTransform(this.scale, 0, 0, this.scale, 0, 0);
+    const s = (typeof this.scale === 'number' && this.scale > 0) ? this.scale : 1;
+    this.ctx.setTransform(s, 0, 0, s, 0, 0);
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -31,19 +42,18 @@ export class Renderer {
   drawMenuBackdrop(t) {
     this._reset();
     const ctx = this.ctx;
-    const g = ctx.createLinearGradient(0, 0, 0, GRID.ROWS * TILE);
+    const g = ctx.createLinearGradient(0, 0, 0, BOARD_H);
     g.addColorStop(0, COLORS.bgTop);
     g.addColorStop(1, COLORS.bgBot);
     ctx.fillStyle = g;
-    ctx.fillRect(0, 0, GRID.COLS * TILE, GRID.ROWS * TILE);
+    ctx.fillRect(-40, -40, BOARD_W + 80, BOARD_H + 80);
 
-    // Burbujas flotantes suaves para dar vida al fondo del menú.
     ctx.save();
     ctx.globalAlpha = 0.10;
     for (let i = 0; i < 18; i++) {
       const seed = i * 137.5;
       const x = ((seed * 7.3) % 960 + t * 12 * (1 + (i % 3))) % 1000;
-      const y = 640 - (((seed * 3.1) % 700) + t * 22 * (0.5 + (i % 4) * 0.2)) % 760;
+      const y = BOARD_H - ((((seed * 3.1) % 700) + t * 22 * (0.5 + (i % 4) * 0.2)) % 760);
       const r = 12 + (i % 5) * 9;
       ctx.beginPath();
       ctx.arc(x, y, r, 0, Math.PI * 2);
@@ -60,6 +70,7 @@ export class Renderer {
     this._reset();
     const ctx = this.ctx;
     const grid = world.grid;
+    if (!grid) return;
     const W = grid.width, H = grid.height;
 
     // cielo
@@ -69,7 +80,7 @@ export class Renderer {
     ctx.fillStyle = sky;
     ctx.fillRect(-40, -40, W + 80, H + 80);
 
-    // nubes simples
+    // nubes
     ctx.save();
     ctx.globalAlpha = 0.22;
     ctx.fillStyle = '#ffffff';
@@ -87,12 +98,11 @@ export class Renderer {
       for (let x = 0; x < grid.cols; x++) {
         const tile = grid.tileAt(x, y);
         const r = grid.cellRect(x, y);
-        if (tile === TILE.PIT) {
+        if (tile === 4) {                     // PIT
           ctx.fillStyle = COLORS.pit;
           ctx.fillRect(r.x, r.y, r.w, r.h);
           continue;
         }
-        // damero suave
         ctx.fillStyle = (x + y) % 2 === 0 ? COLORS.floorA : COLORS.floorB;
         ctx.fillRect(r.x, r.y, r.w, r.h);
         ctx.strokeStyle = COLORS.floorLine;
@@ -101,11 +111,11 @@ export class Renderer {
       }
     }
 
-    // bloques sólidos (con "altura" simulada por una cara superior)
+    // bloques sólidos
     for (let y = 0; y < grid.rows; y++) {
       for (let x = 0; x < grid.cols; x++) {
         const tile = grid.tileAt(x, y);
-        if (tile === TILE.FLOOR || tile === TILE.PIT) continue;
+        if (tile === 0 || tile === 4) continue;   // FLOOR / PIT
         const r = grid.cellRect(x, y);
         this._drawBlock(r.x, r.y, r.w, r.h, tile, t);
       }
@@ -117,30 +127,26 @@ export class Renderer {
     const lift = 7;
     let base, top;
 
-    if (tile === TILE.WALL)        { base = COLORS.wall;   top = COLORS.wallTop; }
-    else if (tile === TILE.COVER)  { base = COLORS.cover;  top = COLORS.coverTop; }
-    else                           { base = COLORS.bumper; top = COLORS.bumperGlow; }
+    if (tile === 1)       { base = COLORS.wall;   top = COLORS.wallTop; }      // WALL
+    else if (tile === 2)  { base = COLORS.cover;  top = COLORS.coverTop; }     // COVER
+    else                  { base = COLORS.bumper; top = COLORS.bumperGlow; }   // BUMPER
 
-    // sombra
     ctx.fillStyle = 'rgba(0,0,0,0.18)';
     ctx.beginPath();
     ctx.ellipse(x + w / 2, y + h - 3, w * 0.42, 7, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // cara frontal
     ctx.fillStyle = base;
     ctx.beginPath();
     ctx.roundRect(x + 2, y + 2 + lift, w - 4, h - 4, 9);
     ctx.fill();
 
-    // cara superior
     ctx.fillStyle = top;
     ctx.beginPath();
     ctx.roundRect(x + 2, y + 2, w - 4, h - 4 - lift, 9);
     ctx.fill();
 
-    // brillo del bumper (pulsa)
-    if (tile === TILE.BUMPER) {
+    if (tile === 3) {   // BUMPER
       const pulse = 0.35 + 0.25 * Math.sin(t * 3 + x * 0.1 + y * 0.1);
       ctx.save();
       ctx.globalAlpha = pulse;
@@ -152,8 +158,7 @@ export class Renderer {
       ctx.restore();
     }
 
-    // detalle de cobertura rota
-    if (tile === TILE.COVER) {
+    if (tile === 2) {   // COVER
       ctx.strokeStyle = 'rgba(90,55,20,0.5)';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
@@ -164,7 +169,7 @@ export class Renderer {
   }
 
   // ══════════════════════════════════════════════════════════════════
-  //  CASILLAS DE MOVIMIENTO Y PELIGRO
+  //  CASILLAS DE MOVIMIENTO Y PISTA
   // ══════════════════════════════════════════════════════════════════
   drawMoveTiles(world, moveTiles) {
     if (!moveTiles || moveTiles.size === 0) return;
@@ -174,7 +179,8 @@ export class Renderer {
     const t = performance.now() / 1000;
 
     for (const [key] of moveTiles) {
-      const [x, y] = key.split(',').map(Number);
+      const parts = key.split(',');
+      const x = Number(parts[0]), y = Number(parts[1]);
       const r = grid.cellRect(x, y);
       const pulse = 0.5 + 0.5 * Math.sin(t * 2.6 + (x + y) * 0.4);
       ctx.fillStyle = COLORS.moveTile;
@@ -204,14 +210,12 @@ export class Renderer {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
-    // halo suave bajo la línea
     ctx.globalAlpha = 0.22;
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 7;
     this._path(pts);
     ctx.stroke();
 
-    // línea punteada animada
     ctx.globalAlpha = 1;
     ctx.strokeStyle = 'rgba(255,255,255,0.95)';
     ctx.lineWidth = 2.6;
@@ -221,7 +225,6 @@ export class Renderer {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // marcadores de rebote
     for (const b of preview.bounces) {
       ctx.fillStyle = '#ffe27a';
       ctx.beginPath();
@@ -231,7 +234,6 @@ export class Renderer {
       ctx.lineWidth = 1.4;
       ctx.stroke();
 
-      // pequeña normal indicando la superficie
       ctx.strokeStyle = 'rgba(255,255,255,0.55)';
       ctx.lineWidth = 1.6;
       ctx.beginPath();
@@ -240,7 +242,6 @@ export class Renderer {
       ctx.stroke();
     }
 
-    // retícula final
     const end = pts[pts.length - 1];
     const hit = preview.hit;
     const color = hit ? '#ff5d6c' : '#ffffff';
@@ -267,7 +268,6 @@ export class Renderer {
     for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
   }
 
-  /** Trayectoria de la pista comprada (resaltada en dorado). */
   drawHint(hintTiles, t) {
     if (!hintTiles || hintTiles.length < 2) return;
     this._reset();
@@ -288,9 +288,6 @@ export class Renderer {
   // ══════════════════════════════════════════════════════════════════
   drawEntities(world, t, selected) {
     this._reset();
-    const ctx = this.ctx;
-
-    // héroes primero, enemigos encima (más legibles)
     for (const p of world.players) this._drawHero(p, t, p === selected);
     for (const e of world.enemies) this._drawEnemy(e, t);
   }
@@ -306,13 +303,11 @@ export class Renderer {
     ctx.translate(x, y + bob);
     ctx.scale(s, s);
 
-    // sombra
     ctx.fillStyle = 'rgba(0,0,0,0.22)';
     ctx.beginPath();
     ctx.ellipse(0, p.radius * 0.95 + 6, p.radius * 0.95, p.radius * 0.36, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // anillo de selección / equipo
     const ringColor = isSelected ? '#ffffff' : p.color;
     ctx.strokeStyle = ringColor;
     ctx.lineWidth = isSelected ? 3.2 : 2;
@@ -322,7 +317,6 @@ export class Renderer {
     ctx.stroke();
     ctx.globalAlpha = 1;
 
-    // pulso de selección
     if (isSelected) {
       const pr = p.radius * (0.95 + 0.28 * Math.sin(t * 4));
       ctx.strokeStyle = 'rgba(255,255,255,0.55)';
@@ -332,7 +326,6 @@ export class Renderer {
       ctx.stroke();
     }
 
-    // cuerpo (cápsula redondeada)
     const bodyR = p.radius;
     const grad = ctx.createLinearGradient(0, -bodyR * 1.5, 0, bodyR * 1.4);
     grad.addColorStop(0, p.accent);
@@ -341,13 +334,10 @@ export class Renderer {
     ctx.beginPath();
     ctx.roundRect(-bodyR * 0.78, -bodyR * 1.25, bodyR * 1.56, bodyR * 2.5, bodyR * 0.72);
     ctx.fill();
-
-    // contorno
     ctx.strokeStyle = 'rgba(0,0,0,0.28)';
     ctx.lineWidth = 1.8;
     ctx.stroke();
 
-    // visor
     ctx.fillStyle = 'rgba(12,26,42,0.85)';
     ctx.beginPath();
     ctx.roundRect(-bodyR * 0.5, -bodyR * 0.86, bodyR * 1.0, bodyR * 0.5, bodyR * 0.22);
@@ -360,7 +350,6 @@ export class Renderer {
     ctx.roundRect(bodyR * 0.08, -bodyR * 0.76, bodyR * 0.26, bodyR * 0.16, 3);
     ctx.fill();
 
-    // destello al recibir daño
     if (p.flash > 0) {
       ctx.globalAlpha = p.flash * 0.8;
       ctx.fillStyle = '#ffffff';
@@ -385,13 +374,11 @@ export class Renderer {
     ctx.translate(x, y + bob);
     ctx.scale(s, s);
 
-    // sombra
     ctx.fillStyle = 'rgba(0,0,0,0.22)';
     ctx.beginPath();
     ctx.ellipse(0, e.radius * 0.95 + 6, e.radius * 0.95, e.radius * 0.34, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // cuerpo romboidal
     const R = e.radius;
     const grad = ctx.createLinearGradient(0, -R * 1.3, 0, R * 1.3);
     grad.addColorStop(0, '#ff8b8b');
@@ -408,7 +395,6 @@ export class Renderer {
     ctx.lineWidth = 1.8;
     ctx.stroke();
 
-    // núcleo
     const coreR = R * 0.34 * (1 + 0.10 * Math.sin(t * 4 + e.bob));
     ctx.fillStyle = '#fff0a8';
     ctx.beginPath();
@@ -419,7 +405,6 @@ export class Renderer {
     ctx.arc(0, 0, coreR * 0.48, 0, Math.PI * 2);
     ctx.fill();
 
-    // antenas
     ctx.strokeStyle = e.color;
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -430,7 +415,6 @@ export class Renderer {
     ctx.beginPath(); ctx.arc(-R * 0.62, -R * 1.55, 2.6, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.arc(R * 0.62, -R * 1.55, 2.6, 0, Math.PI * 2); ctx.fill();
 
-    // marca de boss
     if (e.isBoss) {
       ctx.strokeStyle = '#ffd45e';
       ctx.lineWidth = 2.4;
@@ -452,7 +436,6 @@ export class Renderer {
       ctx.globalAlpha = 1;
     }
 
-    // telegrafía del boss: flecha parpadeante
     if (e.telegraphAngle !== null && e.telegraphAngle !== undefined) {
       ctx.save();
       ctx.globalAlpha = 0.55 + 0.45 * Math.sin(t * 12);
@@ -493,7 +476,6 @@ export class Renderer {
     this._reset();
     const ctx = this.ctx;
     for (const pr of world.projectiles) {
-      // estela
       ctx.save();
       for (let i = 0; i < pr.trail.length; i++) {
         const tp = pr.trail[i];
@@ -507,7 +489,6 @@ export class Renderer {
       }
       ctx.restore();
 
-      // núcleo
       ctx.save();
       ctx.shadowColor = COLORS.projectile;
       ctx.shadowBlur = 16;
@@ -543,6 +524,31 @@ export class Renderer {
       ctx.fillStyle = f.color || '#ffffff';
       ctx.fillText(f.text, f.x, f.y);
     }
+    ctx.restore();
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  //  DIAGNÓSTICO
+  // ══════════════════════════════════════════════════════════════════
+  /** Sobreimpresión de depuración: se activa con game.debug = true. */
+  drawDebug(world, game) {
+    this._reset();
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(8, BOARD_H - 110, 300, 100);
+    ctx.fillStyle = '#7ff0ef';
+    ctx.font = '600 12px monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    const lines = [
+      `scale=${this.scale}  dpr=${window.devicePixelRatio}`,
+      `canvas=${this.ctx.canvas.width}x${this.ctx.canvas.height}`,
+      `board=${BOARD_W}x${BOARD_H}`,
+      `fps=${game && game.fps}  state=${game && game.state}`,
+      `players=${world && world.players.length} enemies=${world && world.enemies.length}`,
+    ];
+    lines.forEach((s, i) => ctx.fillText(s, 14, BOARD_H - 102 + i * 18));
     ctx.restore();
   }
 }
