@@ -24,8 +24,8 @@ import { HUD } from '../ui/HUD.js';
 import { Menu } from '../ui/Menu.js';
 
 import { Vector2 } from '../utils/Vector2.js';
-import { GRID, TILE, GAME, ACTION, BALLISTICS, ECONOMY } from '../utils/Constants.js';
-import { clamp, chebyshev, easeOutCubic } from '../utils/Math.js';
+import { TILE, GAME, ACTION, ECONOMY } from '../utils/Constants.js';
+import { clamp, chebyshev } from '../utils/Math.js';
 
 const enumState = {
   BOOT: 'boot', MENU: 'menu', PLAYING: 'playing',
@@ -52,6 +52,7 @@ export class GameManager {
     this.time = 0;
     this.lastTs = 0;
     this.fps = 60;
+    this.scale = 1;
     this._fpsAcc = 0;
     this._fpsFrames = 0;
 
@@ -66,8 +67,9 @@ export class GameManager {
     this.floatingText = [];
     this.toastEl = document.getElementById('toast');
     this._toastTimer = null;
+    this._enemyTimer = null;
 
-    this._shake = { amount: 0, t: 0, dur: 0 };
+    this._shake = { amount: 0, t: 0, dur: 1 };
     this._bindInput();
     this._bindResize();
     this.menu.show('main');
@@ -87,15 +89,23 @@ export class GameManager {
     });
   }
 
-  get _playing() { return this.state === enumState.PLAYING && this.world && !this.world.gameOver; }
+  get _playing() {
+    return (this.state === enumState.PLAYING || this.state === enumState.RESOLVING) &&
+           this.world && !this.world.gameOver;
+  }
 
   _onDown(p) {
     this.audio.resume();
     if (!this._playing) return;
-    if (!this.world.turns.canInteract) return;
+
+    // Botones del HUD primero (se dibujan en canvas, hay que testearlos a mano).
+    const btn = this.hud.hitTest(p.x, p.y);
+    if (btn) { this._handleButton(btn); return; }
+
+    if (this.state !== enumState.PLAYING) return;
+    if (!this.world.turns || !this.world.turns.canInteract) return;
     if (this.hintTiles && this.hintTiles.length) this.hintTiles = null;
 
-    // Si estamos apuntando, cualquier toque fuera del jugador confirma el tiro.
     if (this.mode === ACTION.AIM) return;
 
     const cell = this.world.grid.cellAtPx(p.x, p.y);
@@ -103,34 +113,47 @@ export class GameManager {
     if (clicked && clicked.alive) {
       this.selectPlayer(clicked);
     } else if (this.selectedPlayer) {
-      // Toque en casilla alcanzable → mover.
-      if (this.moveTiles.has(`${cell.cx},${cell.cy}`)) {
-        this.moveSelectedTo(cell.cx, cell.cy);
-        return;
-      }
-      // Toque lejos → empezar a apuntar desde ese punto.
+      const key = `${cell.cx},${cell.cy}`;
+      if (this.moveTiles.has(key)) { this.moveSelectedTo(cell.cx, cell.cy); return; }
       this.startAim(p);
     }
   }
 
   _onDrag(p) {
-    if (!this._playing || this.mode !== ACTION.AIM) return;
+    if (this.state !== enumState.PLAYING || this.mode !== ACTION.AIM) return;
     this._updateAimAngle(p);
   }
 
   _onDragEnd(p) {
-    if (!this._playing || this.mode !== ACTION.AIM) return;
+    if (this.state !== enumState.PLAYING || this.mode !== ACTION.AIM) return;
     this._updateAimAngle(p);
     this.confirmShot();
   }
 
   _onTap(p) {
     if (!this._playing) return;
+    const btn = this.hud.hitTest(p.x, p.y);
+    if (btn) { this._handleButton(btn); return; }
+    if (this.state !== enumState.PLAYING) return;
+    if (!this.world.turns || !this.world.turns.canInteract) return;
     if (this.mode === ACTION.AIM) { this._updateAimAngle(p); this.confirmShot(); return; }
+
     const cell = this.world.grid.cellAtPx(p.x, p.y);
     const clicked = this.world.collisions.entityAtCell(this.world.players, cell.cx, cell.cy);
     if (clicked && clicked.alive) this.selectPlayer(clicked);
     else if (this.moveTiles.has(`${cell.cx},${cell.cy}`)) this.moveSelectedTo(cell.cx, cell.cy);
+  }
+
+  _handleButton(id) {
+    this.audio.resume();
+    switch (id) {
+      case 'endTurn': this.endTurn(); break;
+      case 'aim':     this.startAim(); break;
+      case 'fire':    this.confirmShot(); break;
+      case 'cancel':  this.cancelAim(); break;
+      case 'hint':    this.useHint(); break;
+      default: break;
+    }
   }
 
   _onKey(key, e) {
@@ -143,38 +166,31 @@ export class GameManager {
     if (this.state === enumState.MENU) return;
     if (!this._playing) return;
 
-    const p = this.selectedPlayer;
     switch (key.toLowerCase()) {
-      case 'tab':
-        e.preventDefault();
-        this.cyclePlayer();
-        break;
-      case ' ':
-        this.endTurn();
-        break;
-      case 'enter':
-        if (this.mode === ACTION.AIM) this.confirmShot();
-        break;
-      case 'h':
-        this.useHint();
-        break;
+      case 'tab':   e.preventDefault(); this.cyclePlayer(); break;
+      case ' ':     if (this.state === enumState.PLAYING) this.endTurn(); break;
+      case 'enter': if (this.mode === ACTION.AIM) this.confirmShot(); break;
+      case 'h':     this.useHint(); break;
       case '1': case '2': case '3': case '4': {
         const idx = Number(key) - 1;
-        if (this.world.players[idx]?.alive) this.selectPlayer(this.world.players[idx]);
+        const p = this.world.players[idx];
+        if (p && p.alive) this.selectPlayer(p);
         break;
       }
-      case 'arrowup':    if (p) this._nudgeMove(p, 0, -1); break;
-      case 'arrowdown':  if (p) this._nudgeMove(p, 0, 1);  break;
-      case 'arrowleft':  if (p) this._nudgeMove(p, -1, 0); break;
-      case 'arrowright': if (p) this._nudgeMove(p, 1, 0);  break;
+      case 'arrowup':    this._nudgeMove(0, -1); break;
+      case 'arrowdown':  this._nudgeMove(0, 1);  break;
+      case 'arrowleft':  this._nudgeMove(-1, 0); break;
+      case 'arrowright': this._nudgeMove(1, 0);  break;
       default: break;
     }
   }
 
-  _nudgeMove(p, dx, dy) {
-    if (!p.alive || p.hasMoved) return;
+  _nudgeMove(dx, dy) {
+    const p = this.selectedPlayer;
+    if (!p || !p.alive || p.hasMoved) return;
     const nx = p.cx + dx, ny = p.cy + dy;
-    if (!this.world.collisions.canEnter(this.world.grid, nx, ny, this.world.players, p)) {
+    const entities = [...this.world.players, ...this.world.enemies];
+    if (!this.world.collisions.canEnter(this.world.grid, nx, ny, entities, p)) {
       this.audio.error();
       return;
     }
@@ -204,18 +220,17 @@ export class GameManager {
   }
 
   _recomputeMoveTiles() {
-    this.moveTiles.clear();
+    this.moveTiles = new Map();
     const p = this.selectedPlayer;
     if (!p || !p.alive || p.hasMoved) return;
-    const occupied = this.world.collisions.occupiedKeys([...this.world.enemies], p);
-    const reach = this.world.grid.reachable(p.cx, p.cy, p.movement, occupied);
-    this.moveTiles = reach;
+    const occupied = this.world.collisions.occupiedKeys(this.world.enemies, p);
+    this.moveTiles = this.world.grid.reachable(p.cx, p.cy, p.movement, occupied);
   }
 
   moveSelectedTo(cx, cy) {
     const p = this.selectedPlayer;
     if (!p || p.hasMoved) return;
-    const occupied = this.world.collisions.occupiedKeys([...this.world.enemies], p);
+    const occupied = this.world.collisions.occupiedKeys(this.world.enemies, p);
     const path = this.world.grid.findPath(p.cx, p.cy, cx, cy, occupied);
     if (!path || !path.length) { this.audio.error(); return; }
     p.moveAlong(path);
@@ -227,17 +242,16 @@ export class GameManager {
   /** Entra en modo apuntado desde la posición del jugador seleccionado. */
   startAim(fromPoint) {
     const p = this.selectedPlayer;
-    if (!p || !p.alive || p.hasShot) return;
+    if (!p || !p.alive || p.hasShot) { this.audio.error(); return; }
     this.mode = ACTION.AIM;
     this.aimFrom = p;
-    this._updateAimAngle(fromPoint || new Vector2(p.pos.x + 40, p.pos.y));
-    this.input.lock();               // el siguiente gesto confirma el tiro
+    const target = fromPoint || new Vector2(p.pos.x + 60, p.pos.y);
+    this._updateAimAngle(target);
   }
 
   cancelAim() {
     this.mode = ACTION.NONE;
     this.preview = null;
-    this.input.unlock();
   }
 
   _updateAimAngle(point) {
@@ -252,31 +266,33 @@ export class GameManager {
   confirmShot() {
     const p = this.aimFrom || this.selectedPlayer;
     if (!p || !p.alive || p.hasShot || this.mode !== ACTION.AIM) return;
-    this.input.unlock();
     this.mode = ACTION.RESOLVING;
     p.hasShot = true;
-    this.audio.resume();
-    this.world.combat.fire(p, this.aimAngle);
     this.preview = null;
+    this.hintTiles = null;
     this.state = enumState.RESOLVING;
     this.world.turns.action = ACTION.RESOLVING;
+    this.world.combat.fire(p, this.aimAngle);
   }
 
   /** Edge case 10: botón Pista. Muestra el tiro ideal si hay monedas. */
   useHint() {
     const p = this.selectedPlayer;
     if (!p || !p.alive) { this.toast('Selecciona un personaje primero'); return; }
+    if (p.hasShot) { this.toast('Este personaje ya disparó'); return; }
     if (this.world.hintUsedThisLevel) { this.toast('Ya usaste la pista en este nivel'); return; }
     if (this.save.data.coins < ECONOMY.HINT_COST) {
       this.toast(`Necesitas ${ECONOMY.HINT_COST} monedas`);
       this.audio.error();
       return;
     }
-    const targets = this.world.enemies.filter((e) => e.alive);
+
+    const allTargets = [...this.world.players, ...this.world.enemies];
     let best = null;
-    for (const t of targets) {
+    for (const t of this.world.enemies) {
+      if (!t.alive) continue;
       const r = this.world.ballistics.findBestShot(p.pos, t, {
-        ...p.traceOptions([...this.world.players, ...this.world.enemies]),
+        ...p.traceOptions(allTargets),
         samples: 720,
       });
       if (r && (!best || r.score > best.score)) best = r;
@@ -287,125 +303,132 @@ export class GameManager {
     this.world.hintUsedThisLevel = true;
     this.hintTiles = best.result.points;
     this.aimAngle = best.angle;
-    this.mode = ACTION.AIM;
     this.aimFrom = p;
     this.preview = best.result;
-    this.input.lock();
-    this.toast('¡Pista desbloqueada! Toca para disparar');
+    this.mode = ACTION.AIM;
+    this.toast('¡Pista desbloqueada! Pulsa DISPARAR');
     this.audio.coin();
   }
 
   endTurn() {
-    if (!this._playing) return;
-    if (!this.world.turns.canInteract) return;
+    if (this.state !== enumState.PLAYING) return;
+    if (!this.world.turns || !this.world.turns.canInteract) return;
     this.cancelAim();
     this.moveTiles.clear();
-    this.world.turns.endPlayerTurn();
     this.state = enumState.RESOLVING;
-    this.world.resolveEnemyStep();
+    this.world.turns.endPlayerTurn();
+    this._scheduleNextEnemyAction();
   }
 
   // ══════════════════════════════════════════════════════════════════
   //  FLUJO DE NIVEL
   // ══════════════════════════════════════════════════════════════════
   startLevel(levelNumber) {
-    const loader = new LevelLoader();
-    const level = loader.load(levelNumber);
-    const grid = Grid.fromLayout(level.layout, TILE);
+    try {
+      const loader = new LevelLoader();
+      const level = loader.load(levelNumber);
+      const grid = Grid.fromLayout(level.layout, TILE);
 
-    const ballistics = new BallisticsSystem(grid);
-    const collisions = new CollisionSystem(grid);
-    const particles = new ParticleSystem();
+      const world = {
+        levelNumber,
+        levelData: level,
+        grid,
+        ballistics: new BallisticsSystem(grid),
+        collisions: new CollisionSystem(grid),
+        particles: new ParticleSystem(),
+        players: [], enemies: [], projectiles: [],
+        turns: null, ai: null, combat: null,
+        gameOver: false, result: null, reward: null,
+        xpRun: 0,
+        stats: { totalShots: 0, totalBounces: 0, kills: 0 },
+        hintUsedThisLevel: false,
+        currentShooter: null, currentTrace: null, lastOutcome: null,
+        shake: (amount, dur) => this.shake(amount, dur),
+        audio: this.audio,
+        showFloatingText: (x, y, text, color) => {
+          this.floatingText.push({ x, y, text, color, life: 1.1, maxLife: 1.1, big: false });
+        },
+      };
 
-    const world = {
-      levelNumber,
-      levelData: level,
-      grid, ballistics, collisions, particles,
-      players: [], enemies: [], projectiles: [],
-      turns: null, ai: null, combat: null,
-      gameOver: false, result: null,
-      xpRun: 0, stats: { totalShots: 0, totalBounces: 0, kills: 0 },
-      hintUsedThisLevel: false,
-      currentShooter: null, currentTrace: null, lastOutcome: null,
-      floatingText: [],
-      shake: (amount, dur) => this.shake(amount, dur),
-      audio: this.audio,
-      showFloatingText: (x, y, text, color) => {
-        this.floatingText.push({ x, y, text, color, life: 1.1, maxLife: 1.1, big: false });
-      },
-      onResolutionDone: null,
-    };
+      // ── jugadores ──────────────────────────────────────────────────
+      const upgrades = this.save.data.upgrades;
+      const unlocked = this.save.data.unlockedChars;
+      let squad = (level.squad && level.squad.length) ? level.squad.slice() : unlocked.slice(0, 3);
+      // Sólo personajes desbloqueados (salvo el primero, que siempre lo está).
+      squad = squad.filter((id) => unlocked.includes(id));
+      if (squad.length === 0) squad = ['scout'];
 
-    // ── jugadores ────────────────────────────────────────────────────
-    const upgrades = this.save.data.upgrades;
-    const unlocked = this.save.data.unlockedChars;
-    const squad = level.squad && level.squad.length
-      ? level.squad
-      : unlocked.slice(0, 3);
-    squad.forEach((charId, i) => {
-      const spawn = level.playerSpawns?.[i] || { cx: 1, cy: 1 + i };
-      const p = new Player(charId, spawn, upgrades);
-      world.players.push(p);
-    });
+      squad.forEach((charId, i) => {
+        const spawn = (level.playerSpawns && level.playerSpawns[i]) || { cx: 1, cy: 1 + i };
+        world.players.push(new Player(charId, spawn, upgrades));
+      });
 
-    // ── enemigos ─────────────────────────────────────────────────────
-    for (const e of level.enemies) {
-      const en = new Enemy(e.type, { cx: e.cx, cy: e.cy }, level.scaling || 1);
-      world.enemies.push(en);
+      // ── enemigos ───────────────────────────────────────────────────
+      for (const e of level.enemies) {
+        world.enemies.push(new Enemy(e.type, { cx: e.cx, cy: e.cy }, level.scaling || 1));
+      }
+
+      // ── sistemas ───────────────────────────────────────────────────
+      world.ai = new AISystem(grid, world.ballistics);
+      world.combat = new CombatSystem(world);
+      world.turns = new TurnManager(world, {
+        onTurnStart: () => { this.save.save(true); },
+      });
+
+      // Asignamos el mundo SÓLO cuando está completo: si algo falla arriba,
+      // this.world sigue siendo el anterior y el juego no queda a medias.
+      this.world = world;
+
+      this.selectedPlayer = null;
+      this.mode = ACTION.NONE;
+      this.preview = null;
+      this.moveTiles = new Map();
+      this.floatingText = [];
+      this.hintTiles = null;
+      this._clearEnemyTimer();
+
+      this.state = enumState.PLAYING;
+      this.menu.hide();
+      this.input.setEnabled(true);
+      this._recomputeMoveTiles();
+      world.turns.startPlayerTurn();
+      this.selectPlayer(world.players[0] || null);
+      this.save.save();
+      if (level.tip) this.toast(level.tip, 3400);
+    } catch (err) {
+      console.error('[Inlimity] Error al cargar el nivel:', err);
+      this.state = enumState.MENU;
+      this.menu.show('main');
+      this.toast('Error al cargar el nivel: ' + err.message, 4000);
     }
-
-    // ── sistemas ─────────────────────────────────────────────────────
-    world.ai = new AISystem(grid, ballistics);
-    world.ai.world = world;
-    world.combat = new CombatSystem(world);
-    world.turns = new TurnManager(world, {
-      onTurnStart: (side) => this._onTurnStart(side),
-    });
-    this.world = world;
-
-    this.selectedPlayer = null;
-    this.mode = ACTION.NONE;
-    this.preview = null;
-    this.moveTiles.clear();
-    this.floatingText = [];
-    this.hintTiles = null;
-
-    this.state = enumState.PLAYING;
-    this.menu.hide();
-    this.world.turns.startPlayerTurn();
-    this.selectPlayer(world.players.find((p) => p.alive) || null);
-    this.save.data.stats.levelsPlayed++;
-    this.save.save();
-  }
-
-  _onTurnStart(side) {
-    this.world.players.forEach((p) => p.resetTurnFlags());
-    this.world.enemies.forEach((e) => e.resetTurnFlags());
-    // Edge case 6: autoguardado al inicio de cada turno.
-    this.save.save(true);
   }
 
   restartLevel() {
+    this._clearEnemyTimer();
     if (this.world) this.startLevel(this.world.levelNumber);
     else this.menu.show('main');
   }
 
   pause() {
-    if (!this._playing) return;
+    if (this.state !== enumState.PLAYING && this.state !== enumState.RESOLVING) return;
+    this._pausedFrom = this.state;
     this.state = enumState.PAUSED;
+    this._clearEnemyTimer();
     this.menu.show('pause');
     this.input.setEnabled(false);
   }
 
   resume() {
     if (this.state !== enumState.PAUSED) return;
-    this.state = enumState.PLAYING;
+    this.state = this._pausedFrom || enumState.PLAYING;
     this.menu.hide();
     this.input.setEnabled(true);
     this.audio.resume();
+    if (this.state === enumState.RESOLVING) this._scheduleNextEnemyAction();
   }
 
   quitToMenu() {
+    this._clearEnemyTimer();
     this.world = null;
     this.state = enumState.MENU;
     this.input.setEnabled(true);
@@ -416,6 +439,8 @@ export class GameManager {
     if (!this.world || this.world.gameOver) return;
     this.world.gameOver = true;
     this.world.result = { victory, reason };
+    this._clearEnemyTimer();
+    this.input.setEnabled(false);
 
     if (victory) {
       const stars = this._computeStars();
@@ -437,7 +462,6 @@ export class GameManager {
       this.audio.defeat();
       this.menu.showDefeat(reason);
     }
-    this.input.setEnabled(false);
   }
 
   _computeStars() {
@@ -448,6 +472,77 @@ export class GameManager {
     if (allAlive) stars++;
     if (w.turns.turnNumber <= limit) stars++;
     return clamp(stars, 1, 3);
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  //  TURNO ENEMIGO
+  // ══════════════════════════════════════════════════════════════════
+  _clearEnemyTimer() {
+    if (this._enemyTimer) { clearTimeout(this._enemyTimer); this._enemyTimer = null; }
+  }
+
+  _scheduleNextEnemyAction() {
+    this._clearEnemyTimer();
+    if (!this.world || this.world.gameOver) return;
+    const delay = this.world.turns._wait > 0 ? this.world.turns._wait * 1000 : 150;
+    this._enemyTimer = setTimeout(() => {
+      this._enemyTimer = null;
+      this._stepEnemyTurn();
+    }, delay);
+  }
+
+  _stepEnemyTurn() {
+    const w = this.world;
+    if (!w || w.gameOver) return;
+    if (!w.turns.isEnemyTurn) return;
+    if (w.turns._wait > 0) { this._scheduleNextEnemyAction(); return; }
+
+    const action = w.turns.nextEnemyAction();
+    if (!action) {
+      w.turns.finishEnemyTurn();
+      this.state = enumState.PLAYING;
+      this.selectedPlayer = this.selectedPlayer && this.selectedPlayer.alive
+        ? this.selectedPlayer
+        : (w.players.find((p) => p.alive) || null);
+      this._recomputeMoveTiles();
+      return;
+    }
+
+    const { enemy, plan } = action;
+    if (!enemy || !enemy.alive) { this._scheduleNextEnemyAction(); return; }
+
+    if (plan.move && plan.move.length) {
+      enemy.moveAlong(plan.move);
+      enemy.hasMoved = true;
+      this._enemyTimer = setTimeout(() => {
+        this._enemyTimer = null;
+        this._enemyFireStep(enemy, plan);
+      }, plan.move.length * 140 + 120);
+    } else {
+      this._enemyFireStep(enemy, plan);
+    }
+  }
+
+  _enemyFireStep(enemy, plan) {
+    const w = this.world;
+    if (!w || w.gameOver) return;
+
+    if (plan.shot) {
+      if (plan.shot.telegraph) {
+        enemy.telegraphAngle = plan.shot.angle;
+        this.toast(`${enemy.name} está cargando un ataque...`);
+        w.turns.wait(0.55);
+      } else if (plan.shot.spread) {
+        enemy.hasShot = true;
+        w.combat.fireSpread(enemy, plan.shot.spread);
+        w.turns.wait(0.3);
+      } else if (typeof plan.shot.angle === 'number') {
+        enemy.hasShot = true;
+        w.combat.fire(enemy, plan.shot.angle);
+        w.turns.wait(0.3);
+      }
+    }
+    this._scheduleNextEnemyAction();
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -463,8 +558,16 @@ export class GameManager {
         this.fps = Math.round(this._fpsFrames / this._fpsAcc);
         this._fpsAcc = 0; this._fpsFrames = 0;
       }
-      this.update(dt);
-      this.render();
+      try {
+        this.update(dt);
+        this.render();
+      } catch (err) {
+        // Un fallo en un frame no debe matar el bucle: lo registramos una vez.
+        if (!this._loopError) {
+          this._loopError = err;
+          console.error('[Inlimity] Error en el bucle:', err);
+        }
+      }
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
@@ -476,20 +579,27 @@ export class GameManager {
       this._shake.t -= dt;
       if (this._shake.t <= 0) this._shake.amount = 0;
     }
-    this._updateFloatingText(dt);
+    for (let i = this.floatingText.length - 1; i >= 0; i--) {
+      const f = this.floatingText[i];
+      f.life -= dt; f.y -= dt * 26;
+      if (f.life <= 0) this.floatingText.splice(i, 1);
+    }
 
-    if (!this.world) return;
     const w = this.world;
+    if (!w) return;
+    if (this.state === enumState.PAUSED) return;
+
+    // El mundo puede estar a medio construir si startLevel falló.
+    if (!w.turns || !w.combat) return;
 
     w.players.forEach((p) => p.update(dt));
     w.enemies.forEach((e) => e.update(dt));
     w.particles.update(dt);
 
-    // proyectiles
     for (let i = w.projectiles.length - 1; i >= 0; i--) {
       const pr = w.projectiles[i];
       pr.update(dt);
-      if (pr.alive && Math.random() < 0.6) {
+      if (pr.alive && Math.random() < 0.55) {
         w.particles.trailPuff(pr.pos.x, pr.pos.y, '#fff3c4');
       }
       if (!pr.alive) w.projectiles.splice(i, 1);
@@ -497,87 +607,31 @@ export class GameManager {
 
     w.turns.update(dt);
 
-    if (this.state === enumState.RESOLVING) {
-      const busy = w.projectiles.length > 0 || w.turns.busy || w.turns._wait > 0 ||
-                   w.players.some((p) => p.isMoving) || w.enemies.some((e) => e.isMoving);
-      if (!busy) this._onResolutionComplete();
+    // Fin de resolución del jugador → devolver el control.
+    if (this.state === enumState.RESOLVING && w.turns.isPlayerTurn) {
+      const busy = w.projectiles.length > 0 ||
+                   w.players.some((p) => p.isMoving) ||
+                   w.enemies.some((e) => e.isMoving);
+      if (!busy) {
+        this.state = enumState.PLAYING;
+        w.turns.action = ACTION.NONE;
+        this.selectedPlayer = this.selectedPlayer && this.selectedPlayer.alive
+          ? this.selectedPlayer
+          : (w.players.find((p) => p.alive) || null);
+        this._recomputeMoveTiles();
+        if (!w.players.some((p) => p.alive && (!p.hasMoved || !p.hasShot))) {
+          this.endTurn();
+        }
+      }
     }
 
     this._checkEndConditions();
   }
 
-  _onResolutionComplete() {
-    const w = this.world;
-
-    if (w.turns.isPlayerTurn) {
-      // Volvemos al control del jugador.
-      this.state = enumState.PLAYING;
-      w.turns.action = ACTION.NONE;
-      if (this.selectedPlayer && !this.selectedPlayer.alive) {
-        this.selectPlayer(w.players.find((p) => p.alive) || null);
-      }
-      this._recomputeMoveTiles();
-      const anyoneCanAct = w.players.some((p) => p.alive && (!p.hasMoved || !p.hasShot));
-      if (!anyoneCanAct) this.endTurn();
-      return;
-    }
-
-    // Turno enemigo: ejecutamos la siguiente acción planificada.
-    const action = w.turns.nextEnemyAction();
-    if (action) {
-      this._executeEnemyAction(action);
-    } else {
-      w.turns.finishEnemyTurn();
-      this.state = enumState.PLAYING;
-      this.selectPlayer(this.selectedPlayer?.alive ? this.selectedPlayer
-        : (w.players.find((p) => p.alive) || null));
-      this._recomputeMoveTiles();
-    }
-  }
-
-  _executeEnemyAction(action) {
-    const { enemy, plan } = action;
-    if (!enemy || !enemy.alive) return;
-
-    const after = () => {
-      if (plan.shot) {
-        this._enemyShoot(enemy, plan.shot);
-      } else {
-        this.state = enumState.RESOLVING;   // fuerza otro paso de resolución
-        this.world.turns._wait = 0.28;
-      }
-    };
-
-    if (plan.move && plan.move.length) {
-      enemy.moveAlong(plan.move);
-      enemy.hasMoved = true;
-      const travel = plan.move.length * 0.14 + 0.12;
-      setTimeout(after, Math.min(900, travel * 1000));
-    } else {
-      after();
-    }
-  }
-
-  _enemyShoot(enemy, shot) {
-    if (shot.telegraph) {
-      enemy.telegraphAngle = shot.angle;
-      this.toast(`${enemy.name} está cargando un ataque...`);
-      this.world.turns._wait = 0.5;
-      return;
-    }
-    if (shot.spread) {
-      this.world.combat.fireSpread(enemy, shot.spread);
-    } else {
-      this.world.combat.fire(enemy, shot.angle);
-    }
-    this.world.turns._wait = 0.25;
-    enemy.hasShot = true;
-  }
-
   _checkEndConditions() {
     const w = this.world;
-    if (!w || w.gameOver) return;
-    if (w.enemies.every((e) => !e.alive)) {
+    if (!w || w.gameOver || !w.turns) return;
+    if (w.enemies.length && w.enemies.every((e) => !e.alive)) {
       this._endLevel(true, 'Todos los enemigos eliminados');
       return;
     }
@@ -591,19 +645,10 @@ export class GameManager {
     }
   }
 
-  _updateFloatingText(dt) {
-    for (let i = this.floatingText.length - 1; i >= 0; i--) {
-      const f = this.floatingText[i];
-      f.life -= dt;
-      f.y -= dt * 26;
-      if (f.life <= 0) this.floatingText.splice(i, 1);
-    }
-  }
-
   shake(amount, dur) {
     this._shake.amount = Math.max(this._shake.amount, amount);
     this._shake.t = Math.max(this._shake.t, dur);
-    this._shake.dur = dur;
+    this._shake.dur = Math.max(this._shake.dur, dur);
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -614,37 +659,37 @@ export class GameManager {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-    if (this.world) {
+    const w = this.world;
+    const renderable = w && w.turns && w.combat && w.grid;
+
+    if (renderable) {
       ctx.save();
       if (this._shake.t > 0) {
-        const k = this._shake.t / (this._shake.dur || 1);
+        const k = clamp(this._shake.t / (this._shake.dur || 1), 0, 1);
         const a = this._shake.amount * k;
         ctx.translate((Math.random() - 0.5) * a * 2, (Math.random() - 0.5) * a * 2);
       }
-      this.renderer.drawBoard(this.world, this.time);
-      this.renderer.drawMoveTiles(this.world, this.moveTiles);
+      this.renderer.drawBoard(w, this.time);
+      this.renderer.drawMoveTiles(w, this.moveTiles);
       this.renderer.drawHint(this.hintTiles, this.time);
       this.renderer.drawPreview(this.preview, this.time);
-      this.renderer.drawEntities(this.world, this.time, this.selectedPlayer);
-      this.renderer.drawProjectiles(this.world);
-      this.world.particles.draw(ctx);
+      this.renderer.drawEntities(w, this.time, this.selectedPlayer);
+      this.renderer.drawProjectiles(w);
+      w.particles.draw(ctx);
       this.renderer.drawFloatingText(this.floatingText);
       ctx.restore();
 
-      this.hud.draw(this.world, {
+      this.ui.drawFrame();
+      this.hud.draw(w, {
         selected: this.selectedPlayer,
         mode: this.mode,
-        aimAngle: this.aimAngle,
         preview: this.preview,
         fps: this.fps,
-        hintTiles: this.hintTiles,
       });
     } else {
       this.renderer.drawMenuBackdrop(this.time);
     }
   }
-
-  resolveEnemyStep() { /* compatibilidad: la cola se resuelve en el bucle */ }
 
   // ══════════════════════════════════════════════════════════════════
   //  UTILIDADES UI
@@ -671,11 +716,10 @@ export class GameManager {
       this.canvas.style.height = `${Math.floor(h)}px`;
       this.canvas.width = Math.floor(GAME.BASE_W * dpr);
       this.canvas.height = Math.floor(GAME.BASE_H * dpr);
-      this.scale = (this.canvas.width / GAME.BASE_W);
-      this.hud.setScale(this.scale);
-      this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+      this.scale = this.canvas.width / GAME.BASE_W;
       this.renderer.setScale(this.scale);
       this.ui.setScale(this.scale);
+      this.hud.setScale(this.scale);
     };
     window.addEventListener('resize', fit);
     window.addEventListener('orientationchange', () => setTimeout(fit, 120));
