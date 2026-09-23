@@ -1,110 +1,54 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Inlimity</title>
-<link rel="stylesheet" href="css/style.css">
-</head>
-<body>
-<div id="app">
-  <canvas id="game" width="960" height="640" aria-label="Tablero de juego Inlimity"></canvas>
+# Inlimity
 
-  <div id="hud" class="overlay-layer"></div>
+Juego táctico por turnos donde las balas **rebotan**. Versión de un solo archivo.
 
-  <div id="menu-root" class="menu-root">
-    <!-- MENU PRINCIPAL -->
-    <section class="screen" data-screen="main">
-      <h1 class="logo">INLIMITY</h1>
-      <p class="tagline">Tácticas por turnos con balas que rebotan</p>
-      <div class="btn-col">
-        <button class="btn primary" data-action="play">JUGAR</button>
-        <button class="btn" data-action="levels">NIVELES</button>
-        <button class="btn" data-action="shop">MEJORAS</button>
-        <button class="btn" data-action="options">OPCIONES</button>
-        <button class="btn ghost" data-action="credits">CRÉDITOS</button>
-      </div>
-      <p class="coins-line">◈ <span data-bind="coins">0</span> &nbsp; ✦ <span data-bind="xp">0</span> XP</p>
-    </section>
+## Qué es
 
-    <!-- SELECCION DE NIVEL -->
-    <section class="screen hidden" data-screen="levels">
-      <h2>Selecciona nivel</h2>
-      <div class="level-grid" data-bind="level-grid"></div>
-      <button class="btn back" data-action="back">VOLVER</button>
-    </section>
+Un único `index.html` autocontenido: sin módulos ES6, sin imports, sin dependencias.
+Abre el archivo y funciona — también con doble clic, sin servidor.
 
-    <!-- TIENDA -->
-    <section class="screen hidden" data-screen="shop">
-      <h2>Mejoras y escuadrón</h2>
-      <p class="coins-line">◈ <span data-bind="coins">0</span></p>
-      <div class="shop-cols">
-        <div><h3>Mejoras persistentes</h3><div data-bind="upgrade-list"></div></div>
-        <div><h3>Personajes</h3><div data-bind="unlock-list"></div></div>
-      </div>
-      <button class="btn back" data-action="back">VOLVER</button>
-    </section>
+## Cómo jugar
 
-    <!-- OPCIONES -->
-    <section class="screen hidden" data-screen="options">
-      <h2>Opciones</h2>
-      <div class="opt-list">
-        <label class="opt"><span>Sonido</span><input type="checkbox" data-opt="sound"></label>
-        <label class="opt"><span>Partículas</span><input type="checkbox" data-opt="particles"></label>
-        <label class="opt"><span>Modo alto contraste</span><input type="checkbox" data-opt="highContrast"></label>
-      </div>
-      <button class="btn danger" data-action="wipe">BORRAR PROGRESO</button>
-      <button class="btn back" data-action="back">VOLVER</button>
-    </section>
+1. Descarga `index.html`
+2. Ábrelo en el navegador (doble clic basta)
+3. Pulsa JUGAR
 
-    <!-- CREDITOS -->
-    <section class="screen hidden" data-screen="credits">
-      <h2>Créditos</h2>
-      <p class="credits-body">
-        Inlimity — juego táctico por turnos.<br>
-        Motor propio en JavaScript vanilla + Canvas 2D.<br>
-        Sin dependencias externas. Licencia MIT.
-      </p>
-      <button class="btn back" data-action="back">VOLVER</button>
-    </section>
+## Controles
 
-    <!-- PAUSA -->
-    <section class="screen hidden" data-screen="pause">
-      <h2>Pausa</h2>
-      <div class="btn-col">
-        <button class="btn primary" data-action="resume">CONTINUAR</button>
-        <button class="btn" data-action="restart">REINICIAR NIVEL</button>
-        <button class="btn" data-action="options">OPCIONES</button>
-        <button class="btn ghost" data-action="quit">SALIR AL MENÚ</button>
-      </div>
-    </section>
+| Acción | Táctil | Teclado |
+|---|---|---|
+| Seleccionar personaje | Toca su figura o su tarjeta | `1`–`4`, `Tab` |
+| Mover | Toca una casilla iluminada | Flechas |
+| Apuntar | Pulsa APUNTAR y arrastra | Clic y arrastra |
+| Disparar | Suelta el dedo | `Enter` |
+| Terminar turno | Botón TERMINAR TURNO | `Espacio` |
+| Pista | Botón PISTA (50 monedas) | `H` |
+| Pausa | — | `Esc` |
 
-    <!-- VICTORIA -->
-    <section class="screen hidden" data-screen="victory">
-      <h2 class="win">¡NIVEL COMPLETADO!</h2>
-      <div class="stars-big" data-bind="stars">☆☆☆</div>
-      <ul class="result-list" data-bind="result-list"></ul>
-      <div class="btn-col">
-        <button class="btn primary" data-action="next">SIGUIENTE NIVEL</button>
-        <button class="btn" data-action="restart">REPETIR</button>
-        <button class="btn ghost" data-action="quit">MENÚ</button>
-      </div>
-    </section>
+## Mecánica
 
-    <!-- DERROTA -->
-    <section class="screen hidden" data-screen="defeat">
-      <h2 class="lose">ESCUADRÓN ELIMINADO</h2>
-      <p data-bind="defeat-reason"></p>
-      <div class="btn-col">
-        <button class="btn primary" data-action="restart">REINTENTAR</button>
-        <button class="btn ghost" data-action="quit">MENÚ</button>
-      </div>
-    </section>
-  </div>
+El daño escala un **+15% por cada rebote** de la bala. Un tiro directo pega poco;
+umo que rebota tres paredes pega mucho. Los **bumpers** conservan la energía, las
+**coberturas** se destruyen al impactarlas, los **fosos** bloquean el paso pero no las balas.
 
-  <div id="toast" class="toast hidden"></div>
-</div>
+## Personajes
 
-<script type="module" src="js/main.js"></script>
-</body>
-</html>
+- **Scout** — rápido y preciso, poca vida
+- **Bounce** — +2 rebotes máximos (500 monedas)
+- **Tank** — mucha vida y daño, lento (1000 monedas)
+- **Ghost** — atraviesa la primera cobertura (2000 monedas + 3★ en el nivel 3)
+
+## Enemigos
+
+Grunt (agresivo), Sniper (campista), Brute (cargador), Drone (flanqueador) y OMEGA,
+el boss de tres fases: disparo simple, ataque telegrafiado y abanico triple.
+
+## Estructura anterior
+
+Este repositorio conserva la versión modular anterior (`js/`, `css/`, `index.html`),
+que usa módulos ES6 y requiere servidor local. La versión de un solo archivo la
+sustituye: es la que funciona sin configuración.
+
+## Licencia
+
+MIT.
