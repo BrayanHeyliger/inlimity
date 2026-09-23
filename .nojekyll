@@ -1,0 +1,2 @@
+# Este archivo evita que GitHub Pages procese el repo con Jekyll.
+# Sin él, Jekyll ignora archivos y carpetas que empiezan por guion bajo.

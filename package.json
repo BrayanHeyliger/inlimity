@@ -1,0 +1,11 @@
+{
+  "name": "inlimity",
+  "version": "1.0.0",
+  "description": "Juego táctico por turnos con balas que rebotan. JavaScript vanilla + Canvas 2D, sin dependencias.",
+  "type": "module",
+  "license": "MIT",
+  "keywords": ["juego", "canvas", "tactico", "turnos", "ricochet", "vanilla-js"],
+  "scripts": {
+    "start": "npx serve ."
+  }
+}
